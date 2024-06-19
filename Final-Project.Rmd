@@ -1,0 +1,752 @@
+---
+title: "Final Project"
+author: "Sarah Lew"
+date: "2024-06-14"
+output:
+  html_document:
+    toc: true 
+    toc_float: true
+    code_folding: show
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The aim of this project is to build a machine learning model that can predict the user rating of beauty products sold at the Sephora online store. Sephora, a popular retailer of personal and beauty products, launched its online store in 1999 and sells items such as cosmetics, skincare, hair care, and fragrances.
+
+Imagine scrolling through hundreds of products on the Sephora website--each offering different advantages while being at contrasting price points. When it comes to beauty and skincare, obtaining accurate insights on whether a product is right for individual interests and skin types is invaluable. "Which of these is right for me? Which product is truly worth spending on?" These are questions I often ask myself when looking for a new product to purchase, even with any other online retailer.
+
+Fortunately for shoppers, like myself, knowing that consumers with similar product preferences have already tried and purchased the item makes all the difference in making the right purchasing decision. In moments like these, relying on user ratings and reviews provides promising reassurance in making the best choice.
+
+I noticed that a product rating on the Sephora website only consists of 5 stars that are filled accordingly on a continuous scale of 1 to 5 (lowest to highest). I started to wonder, "What exactly drives a user to give a product a high or low rating?" I realized there are numerous factors that could impact this even beyond the product's performance like its brand, popularity, and even whether or not it is an exclusive item.
+
+I would like to predict how a rating is determined by users based on these characteristics and to uncover trends or patterns from Sephora product ratings. By understanding how product factors contribute to high or low ratings, we can be better informed on shopper decision making.
+
+The dataset that I am using for the project was found on Kaggle, "[Sephora Products and Skincare Reviews."](https://www.kaggle.com/datasets/nadyinky/sephora-products-and-skincare-reviews) It consists of information on over 8,000 products from the Sephora online store, and was scraped by Nady Inky via Python scraper in March 2023.
+
+![[Image Source](http://www.sephora.com)](images/sephora2.gif){width="230"}
+
+# Project Outline
+
+First, we will load the packages necessary for the project and the `products` dataset we are using. To clean up data values, we will tidy any missing observations. Now, the data will be ready to explore through EDA (Exploratory Data Analysis). We will be analyzing the different relationships between our predictor variables and our response variable, `rating`. We can then build our recipe using the variables we are interested in for our model to use in prediction and split our data into training and testing. Before we build any models, it is useful to perform k-fold cross validation on our training data. Now, we can finally set up our 6 models: Linear Regression, K-Nearest Neighbors, Elastic Net, Decision Tree, Random Forest, and Boosted Trees. After applying these models to our folds, we will determine the best performing model and its parameters based on the Root Mean Squared Error (RMSE), and fit it to our training and testing data. Once this is completed, we can see how well our model performs in predicting the `rating` for Sephora products!
+
+# Loading Packages and Data
+
+First, let's load our packages and raw Sephora `products` data.
+
+```{r, message = FALSE}
+# loading all packages
+library(tidyverse)
+library(dplyr)
+library(tidymodels)
+library(kknn)
+library(corrplot)
+library(ggplot2)
+library(visdat)
+library(finalfit)
+library(kableExtra)
+library(naniar)
+library(forcats)
+library(pals)
+library(carat)
+library(vip)
+library(yardstick)
+library(ranger)
+library(xgboost)
+library(wesanderson)
+
+# loading data 
+products <- read_csv("data/product_info.csv")
+tidymodels_prefer()
+```
+
+# Exploring and Tidying the Raw Data
+
+Now we can start exploring the dataset and its values.
+
+```{r}
+# determining rows and columns number
+dim(products)
+```
+
+There are 8494 observations in the dataset with 27 variables. Let's take a look at whether the data has missing information to determine how to handle this.
+
+```{r include = FALSE}
+# visualizing missing data values
+products %>%
+  missing_plot()
+```
+
+```{r, fig.width = 8}
+# view the summary for missing values
+products %>%
+  miss_var_summary() %>%
+  kable() %>%
+  kable_material(c("striped", "hover","condensed")) %>%
+  scroll_box(width = "100%", height = "350px")
+
+vis_miss(products)
+```
+
+Our dataset has quite a bit of missing values! There is missing data for 14 of the 27 predictors. This includes predictors including `reviews`, `size`, `variation_type`, `variation_value`, `variation_desc`, `ingredients`, `value_price_usd`, `sale_price_usd`, `highlights`, `secondary_category`, `tertiary_category`, `child_max_price`, `child_min_price`.
+
+We should examine if there is a pattern of missingness between variables. What's notable in the missing data plot is `rating` and `reviews`. There is 3.27% of data for the response variable, `rating`, that is missing, and we can see that this same percent is missing for `reviews`.
+
+```{r}
+products %>% 
+  count(across(c(reviews, rating), is.na))
+```
+
+While 19.3% of the data is missing, 80.7% is present and we can still use that for our EDA process. Most of the missing data comes from predictors `sale_price_usd`, `value_price_usd`, and `variation_desc`. Let's drop these variables along with others that have a high percentage missing or are also irrelevant to the prediction.
+
+```{r}
+# dropping predictors
+column_drop <- c("sale_price_usd", "value_price_usd", "variation_desc", "child_max_price", "child_min_price", "highlights", "size", "variation_value", "variation_type", "tertiary_category", "ingredients", "child_count")
+
+products = products[,!(names(products) %in% column_drop)]
+
+# dropping rows with missing observations
+products <- products[complete.cases(products), ] 
+```
+
+Let's convert any categorical variables to factors. Then, let's take a look our dataset now and its dimensions!
+
+```{r}
+products$primary_category <- as.factor(products$primary_category)
+products$secondary_category <- as.factor(products$secondary_category)
+
+ # head() to see first rows
+products %>%
+  head() %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(width = "100%", height = "200px")
+
+dim(products)
+```
+
+## Describing Predictors
+
+These are 10 out of the original 27 variables that I have selected from the Sephora products dataset which will be used to create the model recipe. I decided to remove variables including `brand_name` or `product_name` so that our model can better generalize predictions for new brands and products as well.
+
+-   `loves_count`: the number of people who have marked the product as a 'favorite' on the site
+
+-   `reviews`: the number of user reviews for the product
+
+-   `limited_edition`: binary value that indicates whether the product is limited edition or not (1-true, 0-false)
+
+-   `new`: binary value that indicates whether the product is new or not (1-true, 0-false)
+
+-   `online_only`: binary value that indicates whether the product is only sold online or if it is also sold in store (1-true, 0-false)
+
+-   `out_of_stock`: binary value that indicates whether the product is currently out of stock or not (1-true, 0-false)
+
+-   `sephora_exclusive`: binary value that indicates whether the product is exclusive to Sephora or not (1-true, 0-false)
+
+-   `primary_category`: first category that the product falls under on the site (ex. Fragrance, Bath & Body, Hair)
+
+-   `seconary_cateogry`: second category that the product falls under on the site (ex. Women, Hair Styling & Treatment, Sunscreen)
+
+-   `price_usd`: price of the product in US Dollars
+
+# Visual Exploratory Data Analysis
+
+## Distribution of Rating
+
+We can first take a look at the distribution of our response variable `rating`.
+
+```{r}
+# creating histogram of rating
+ggplot(products, aes(rating)) + 
+  geom_histogram(binwidth = 1, fill = "rosybrown3") + 
+  ggtitle("Histogram of Sephora Product Ratings") +
+  xlab("Rating") + ylab("Frequency") + 
+stat_bin(binwidth=1, geom='text', color='black', aes(label=after_stat(count)),
+           position=position_stack(vjust = 0.5)) + theme_minimal()
+```
+
+The histogram indicates that the ratings for Sephora products follow a left-tailed distribution. The most common rating is 4, as 5119 of the 8209 products. The second highest rating for products is 5, with 2289 of the products.
+
+## Variable Correlation Plot
+
+We can utilize a correlation matrix of our numeric variables to determine if there are relationships between variables.
+
+```{r}
+# selecting numeric values
+var_numeric <- products %>%
+  select(c(price_usd, rating, loves_count, reviews)) %>% 
+  cor() %>% 
+  corrplot(type = 'lower', diag = TRUE, 
+           method = 'color')
+```
+
+While there appears to be some positive weak correlation between `rating` and `reviews` for a particular product, there appears to be nearly no correlation between the number of `reviews` and the `price_usd`. We can notice, however, that there is also a positive weak correlation between the `price_usd` and `rating`. This is surprising to me, since I believed there would be more of a strong positive correlation between the number of `reviews` and `rating`, as a greater number of reviews may indicate high popularity of a product and thus a higher `rating`. We can see that there is a moderately high positive correlation between the number of `reviews` and `loves_count`. However, `loves_count` only has a slightly positive relationship to `rating`, which means that it may not be a strong predictor of it.
+
+## Product Prices
+
+Let's find more insight on the weak positive correlation between `price_usd` and `rating`. I expect that products with lower prices may have a higher rating as they are more affordable. This is because cheaper products can be perceived to offer good value for the price paid, especially when it performs better than expected for that price point. On the other hand, some products that are expensive can exceed expectations of the consumer and lead to higher ratings. We can explore this relationship on Sephora's online products to see if these assumptions are true.
+
+```{r}
+# creating scatterplot 
+ggplot(products, aes(x=price_usd, y=rating)) + 
+geom_point(alpha=0.3, color="rosybrown3") +
+  scale_x_continuous(breaks = pretty(products$price_usd, n = 10)) + 
+ggtitle("Scatterplot of Sephora Product Ratings and Price (USD)") +
+  xlab("Price (USD)") + ylab("Rating") + theme_minimal()
+```
+
+Wow, we can see that there are a lot of observations that fall between 0 and 100 dollars. There are also many that fall from 200 to 400 dollars, and a couple of these have low average ratings. We also notice that there is one observation that falls around \$1900! That is pretty expensive compared to the prices of all other products, so we can consider this an outlier and remove it from our `products` dataset. Removing outliers is important in data preprocessing since it can affect the results of our model performance.
+
+After we remove this observation, let's take a closer look at the relationship between `price_usd` and `rating` using another scatterplot.
+
+```{r, messages = FALSE}
+# finding this exact observation and removing
+products <- products[products$price_usd < 1900, ] 
+
+# plotting new scatterplot
+ggplot(products, aes(x=price_usd, y=rating)) + 
+geom_point(alpha =0.3, color="rosybrown3") + 
+geom_smooth(formula = y ~ x,method = "lm", se = FALSE, color = "black", lty = 1, linewidth = 0.5) +
+ggtitle("Scatterplot of Product Ratings and Price (without Outliers)") +
+  xlab("Price (USD)") + ylab("Rating") + theme_minimal()
+```
+
+Now we can take a much closer look at how the `price_usd` of a particular product relates to its `rating`. We can see that there is a moderately positive relationship between the `price` and the `rating` of the product. However, it is important to note that lower prices also have fairly high ratings, and that majority of the prices are lower. This indicates that the relationship between prices and rating of a product is not as necessarily as straightforward as we assumed, but we can still consider it an important variable of `rating`.
+
+## Sephora Exclusive Products
+
+Sephora often has new products that are highly promoted on their website and on social media. This promotion influences many consumers to purchase, especially if that product is exclusive to Sephora. There is even a section on their website that is dedicated to 'Sephora Only' brands, which includes higher end and celebrity brands (created by celebrities like Rihanna, Selena Gomez, etc!).
+
+To explore how `sephora_exclusive` and products and `rating` may be related, I created a box plot that shows their relationship.
+
+```{r}
+# creating box plot 
+products %>% 
+  ggplot(aes(x = factor(sephora_exclusive), y = rating, color = factor(sephora_exclusive))) +
+  geom_jitter(alpha = 0.2, width = 0.3, height = 0) + theme_minimal() +
+  labs(title = "Scatter Plot: Sephora Exclusive Products vs. Rating",
+       x = "Sephora Exclusive",
+       y = "Rating",
+       color = "Sephora Exclusive") +
+   scale_color_manual(values = c("0" = "rosybrown3", "1" = "seashell4"))
+```
+
+We can see that products that are exclusive to Sephora mostly have ratings that are above 3, as many of the non-Sephora exclusive products fall under a rating of 3. However, it is important to note that there are more points that indicate the number of non-Sephora exclusive products compared to those that are exclusive. This implies that products marked `sephora_exclusive` tend to have more ratings above 3, but these are less in number of overall product count on the website. Let's keep this in mind as we continue our analysis.
+
+## Loves Count and Reviews
+
+`loves_count` refers to the number of hearts a particular product has on the Sephora website. Users will select a product's heart icon as a 'love' if it is one of their favorites. It's a great way for shoppers to save and collect their best products for easier checkout. Earlier, we saw that there is a moderately positive correlation between the number of loves and the number of `reviews`.
+
+```{r, message = FALSE, results = 'hide'}
+# creating scatterplot 
+ggplot(products, aes(x = loves_count, y = reviews)) +
+  geom_point(alpha = 0.2, color = "rosybrown3") +
+  geom_smooth(formula = y ~ x,method = "lm", se = FALSE, color = "black", lty = 1, linewidth = 0.5) +
+  labs(title = "Scatter Plot of Loves Count vs Reviews",
+       x = "Loves Count",
+       y = "Reviews") + 
+  theme_minimal()
+```
+
+From this graph, we can see that there is a positive relationship of `reviews` and `loves_count`, confirming our original expectations. We can also note that the majority of these points are clustered around 2500 `reviews` and 2.5e+05 `loves_count`. This again reinforces the idea that although there is a positive correlation between these two variables, it is not extremely strong.
+
+## New and Limited Edition Products
+
+Typically, `new` products will have a higher rating as early consumers will be enthusiasts of that particular product or brand. Like I mentioned before, new products are promoted throughout social media on the Sephora Instagram account as well as through social media influencers. In addition, some early reviewers could be receiving incentives from trying that product, which would also lead to higher ratings. I decided to use a boxplot to see if this is true.
+
+```{r}
+# comparing new and limited edition using boxplot
+products %>% 
+  ggplot(aes(x = rating, y = factor(new), fill = factor(limited_edition))) + geom_boxplot() + 
+  labs( 
+    title = "Box Plot of New, Limited Edition Sephora Products and Rating",
+    y = "New",
+    x = "Rating",
+    fill = "Limited Edition") +    scale_fill_manual(values = c("rosybrown3", "seashell3")) + theme_minimal()
+```
+
+We can see that new products do have a slightly higher average rating around 4.5. If these products are `limited_edition`, however, they are slightly lower in average rating. It is also important to note that there are some outliers with low ratings (1 and 2) but are also limited edition and new. New, limited edition products have a larger interquartile range, indicating that there is a wider distribution of scores.
+
+As for non-new products, the average rating is very close whether or not it is a limited edition product or not. This implies that there may not be a close relationship between these two variables and `rating`.
+
+## Category Comparisons
+
+Sephora carries many types of products on their website. This includes a range of fragrances for both men and women, makeup, skincare, hair care, and other tools as well. To better understand what types and how many categories we are working with, I want to visualize these categories (secondary and primary), but first let's see how many there are in each.
+
+```{r}
+# bar chart of primary
+ggplot(products, aes(y = fct_infreq(primary_category))) +
+geom_bar(fill = "rosybrown3") +
+labs(
+    title = "Count of Each Primary Category") + theme_minimal()
+
+# bar chart of secondary
+products %>% 
+  ggplot(aes(y = fct_infreq(secondary_category))) +
+  geom_bar(fill = "seashell3") +
+  labs(
+    title = "Count of Each Secondary Category") + theme_minimal()
+```
+
+We can see there 8 different primary categories that all the products fall under. There are significantly more products that are 'skincare', 'makeup', 'hair', and 'fragrance' in comparison to 'mini size', 'men', and 'tools & brushes'. Most of the products fall under either "Skincare" and "Makeup". We should prioritize products that have a higher count and we can group the others in a separate category.
+
+We can also visualize the secondary categories for the products, which have 41 different factors. There are many of these categories that are similar, so we can collapse these as well to make the data more concise. For example, "Tools" can account for products in "Tools", "High Tech Tools", "Beauty Tools", and "Hair Tools". Let's collapse these and then combine products with a lower count into "Other".
+
+```{r, warning = FALSE, fig.width = 10}
+# lumping primary categories 
+products$primary_category <- fct_lump_n(
+  products$primary_category,
+  5,
+  other_level = "Other")
+
+# collapsing secondary category 
+products$secondary_category = fct_collapse(products$secondary_category,
+"Bath" = c("Bath & Body", "Bath & Shower"),
+"Beauty" = c("Beauty Accessories", "Beauty Supplements"),
+"Body" = c("Body Care", "Body Moisturizers"),
+"Eye" = c("Eye", "Eye Care"),
+"Hair" = c("Hair", "Shampoo & Conditioner", "Hair Styling & Treatments"),
+"Lip" = c("Lip", "Lip Balms & Treatments"),
+"Tools" = c("Tools", "High Tech Tools", "Beauty Tools", "Hair Tools", "Brushes & Applicators"),
+"Face" = c("Lip", "Cheek", "Face"),
+"Skincare" = c("Skincare", "Sunscreen"))
+
+products$secondary_category <- fct_lump_n(
+   products$secondary_category, 17,
+   other_level = "Other")
+
+# checking levels of secondary category after collapse
+levels(products$secondary_category)
+```
+
+### Distribution by Primary Category
+
+Now that we have collapsed and moved similar categories into one, we can better visualize the relationship between the primary and secondary categories. However, I also want to see the distribution of `rating` by `primary_category` using a boxplot.
+
+```{r}
+# creating boxplot
+ggplot(products, aes(x = primary_category, y = rating)) + 
+  geom_boxplot(aes(fill = primary_category)) + 
+  scale_fill_manual(values = as.vector(stepped(20))) +
+  labs(title = "Distribution of Ratings by Primary Category",
+       x = "Primary Category",
+       y = "Rating") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Upon observation of this box plot, we can see that of the 6 primary categories, "Fragrance" and "Skincare" have the highest ratings. However, these values are extremely close to the other category ratings, such as "Bath & Body" and "Skincare". "Makeup" has the lowest rating, but it's important to note that these are all very close and therefore may not play a direct role in how high a particular product is rated.
+
+### Primary and Secondary Categories
+
+Now let's explore the relationship between the categories themselves. Often, products are marked with a specific category on the site and then organized within other categories that are more specific and unique. I decided to use a stacked bar chart to see how the primary categories consist of products that belong to secondary categories. I expect that there will be overlap between common category titles, but I am particularly curious on categories that are more uncommon within Sephora, such as how products for men are distributed.
+
+```{r, fig.width = 8}
+# plotting stacked boxplot of secondary and primary categories
+ggplot(products, aes(fill = secondary_category, x = primary_category)) + 
+  geom_bar(position = "fill") + 
+  labs(
+    title = "Stacked Boxplot of Primary and Secondary Categories", 
+    x = "Primary", y = "Count", fill = "Secondary")  +
+  scale_fill_manual(values=as.vector(stepped(20))) + theme_minimal()
+```
+
+Although we were able to collapse and group many of the secondary categories together, there are still a lot of categories left to analyze! Now we can better visualize which primary categories consist of their respective secondary categories and the percentage as well. What surprises me is that "Bath & Body" products are nearly 70% body products, and the remainder consists of "Bath", "Mini Size", and "Value & Gift Sets" and "Other". We can also see that "Fragrance" is majority for "Women" than "Men". What's also surprising is that even the percentage of "Candles & Home Scents" is larger than the percentage of products for "Men" under "Fragrance" primary category. To my surprise, "Men" does not fall under many of the other primary categories, and neither does "Women". This is great in making sure that most categories can be marketed toward any audience regardless of gender. The secondary category "Value & Gift Sets" is also part of every primary category, indicating that all categories of products have some sort of value or gift set available to purchase. Since these two categorical variables are related to each other, we should keep this in mind when understanding how our variables can predict a rating.
+
+# Setting Up Models
+
+Now that we have a better understanding of our dataset, we can start setting up our models to predict product ratings! We need to split our data into training and testing data, create our recipe, and perform cross validation.
+
+## Splitting Data
+
+First let's split our data, and set the `prop` argument to be 0.7 so that 70% is used for training. The `strata` argument is set to be our response variable, `rating`. I decided to use 0.7 as the proportion for the split so that there is a significant amount of training data to help the model predict accurate results. This will help with reducing overfitting and improve the model's performance on the testing data. It is also important to set a seed so that we can reproduce our results.
+
+```{r}
+set.seed(3435)
+# splitting the data
+products_split <- initial_split(products, prop = 0.7, strata = rating) 
+
+products_train <- training(products_split)
+products_test <- testing(products_split) 
+
+# viewing the dimensions of training/testing data
+dim(products_train) 
+dim(products_test)
+```
+
+There are 5744 observations in our training data, and 2464 in our testing data. This is a good amount for us to use for testing and training our `products` dataset.
+
+## Building Recipe
+
+Let's build our recipe! The recipe will represent the model we are fitting and can be given to the different model 'engines' that we are using later. We will be using the 10 predictors: `loves_count`, `reviews`, `limited_edition`, `new`, `online_only`, `out_of_stock`, `sephora_exclusive`, `primary_category`, `secondary_category`, `price_usd` out of the 27 original.
+
+We also need to dummy-code any categorical variables and center and scale the features to normalize them. Earlier, we tidied the data and dropped the columns with missing values as well as observations with missing data (as these were related), so there is no need to impute. In addition, I already collapsed levels of `primary_category` and `secondary_category` by prioritizing their higher counts, so we can add these predictors directly into the recipe. I also decided to not include predictors: `brand_name`, `brand_id`, `product_name`, and `product_id`. This is because I want the model to be able to predict new products or items from new brands based on the other variables in our dataset. The model can then better generalize predictions that will extend beyond the specific products or brands that are already offered on the website. Our completed recipe is below:
+
+```{r}
+# creating recipe 
+
+products_recipe <- recipe(rating ~ loves_count + reviews + limited_edition + new + online_only + out_of_stock + sephora_exclusive + primary_category + secondary_category + price_usd, data = products) %>%
+  step_dummy(all_nominal_predictors()) %>% # categorical variables are dummy encoded
+  step_nzv(all_predictors()) %>% # removing columns with zero variance 
+  step_zv(all_predictors()) %>% 
+  step_center(all_predictors()) %>% # features are centered and scaled for those models
+  step_scale(all_predictors())
+
+prep(products_recipe) %>% bake(new_data = products_train) # prep and bake recipe to view
+```
+
+## K-Fold Cross Validation
+
+We want to find the best value of `neighbors` that yields the best performance when applied to new data. This hyperparameter tuning process can be done using k-fold cross validation.
+
+This process involves dividing randomly the set of observations into "k" folds of equal size approximately. While the first fold is the validation set, the method is fit on the remaining folds. In this case, we are using k = 10 to create 10 folds.
+
+We are stratifying on the response variable `rating`.
+
+```{r}
+product_folds <- vfold_cv(products_train, v = 10, strata = rating)
+```
+
+# Model Building and Process
+
+Now we can finally start building our models. The model building process consists of these steps. For this project, I have decided to fit 6 models: Linear Regression, K Nearest Neighbors, Elastic Net Linear Regression, Decision Tree, Random Forest, and Boosted Trees.
+
+## Performance Metric
+
+To access the performance of all our models, I decided to choose Root Mean Squared Error (RMSE) as the metric. The RMSE squares the differences of predicted and actual values, takes the mean, and quantifies the square root. Lower values of RMSE indicate a better predictive accuracy.
+
+![](rmse.jpeg){width="298"}
+
+Image [Source](https://docs.oracle.com/en/cloud/saas/planning-budgeting-cloud/pfusu/insights_metrics_RMSE.html)
+
+## Process
+
+1)  Setting up Model
+
+The first step is to set up the model we are using. This includes specifying the `set_mode`, which is `regression` in this case as our response variable `rating` is continuous. It also includes setting the engine, which will be specific to the type of model that is being set up. We will also set specific parameters to be tuned with `tune()`.
+
+```{r}
+# linear regression model
+lm_model <- linear_reg() %>%
+  set_engine("lm")
+  
+# k- nearest neighbors 
+knn_model <- nearest_neighbor(neighbors = tune()) %>%
+  set_mode("regression") %>% 
+  set_engine("kknn")
+
+# elastic net linear model
+en_model <- linear_reg(penalty = tune(), 
+                      mixture = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet")
+
+# decision tree
+tree_model <- decision_tree(cost_complexity = tune()) %>%
+  set_engine("rpart") %>% 
+  set_mode("regression")
+
+# random forest
+rf_model <- rand_forest(mtry = tune(),
+                        trees = tune(),
+                        min_n = tune()) %>%
+  set_engine("ranger", importance = "impurity") %>%
+  set_mode("regression")
+
+# gradient boosted trees 
+bt_model <- boost_tree(mtry = tune(), 
+                       trees = tune(), 
+                       learn_rate = tune()) %>%
+  set_engine("xgboost") %>%
+  set_mode("regression")
+```
+
+2)  Setting Up Model Workflow
+
+In this step, we will be adding the model for each respective type, and also the `products_recipe` that we created earlier.
+
+```{r}
+# linear regression
+lm_wkflow <- workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(products_recipe)
+
+# k- nearest neighbors 
+knn_wkflow <- workflow() %>% 
+  add_model(knn_model) %>% 
+  add_recipe(products_recipe)
+
+# elastic net
+en_wkflow <- workflow() %>% 
+  add_recipe(products_recipe) %>% 
+  add_model(en_model)
+
+# decision tree
+tree_wkflow <- workflow() %>% 
+  add_model(tree_model) %>% 
+  add_recipe(products_recipe)
+
+# random forest 
+rf_wkflow <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(products_recipe) 
+
+# gradient boosted trees
+bt_wkflow <- workflow() %>%
+  add_model(bt_model) %>%
+  add_recipe(products_recipe)
+```
+
+3)  Setting Up Grids for Tuning Parameters
+
+This is a way to fit many models with different hyperparameters to see which will perform the best. We will tune parameters for all models with the exception of linear regression. Then, we will specify appropriate ranges for the parameters that require tuning.
+
+```{r}
+# linear regression: no tuning parameters, no grid 
+
+# k- nearest neighbors 
+knn_grid <- grid_regular(
+              neighbors(range = c(1,10)), 
+              levels = 5)
+
+# elastic net
+en_grid <- grid_regular(
+            penalty(range = c(-1,0.5)), 
+            mixture(range = c(0, 1)),
+            levels = 10)
+
+# decision tree
+param_grid <- grid_regular(
+              cost_complexity(range = c(-3, -1)), 
+              levels = 10)
+
+# random forest
+rf_grid <- grid_regular(mtry(range = c(1,8)), 
+              trees(range = c(10, 100)), 
+              min_n(range = c(10, 20)), 
+              levels = 5)
+
+# boosted trees
+bt_grid <- grid_regular(mtry(range = c(1,8)), 
+                        trees(range = c(20, 500)),
+                        learn_rate(range = c(0.1,0.5), 
+                        trans = identity_trans()),
+                        levels = 5)
+```
+
+4)  Tuning Models
+
+To tune the models, we will use `tune_grid()`, and specify the model's workflow and grid for our parameters.
+
+```{r, warning=FALSE, message=FALSE, eval = FALSE}
+# linear regression: no tuning parameters, no grid 
+
+# k- nearest neighbors 
+tune_knn <- tune_grid(knn_wkflow, 
+  resamples = product_folds,
+  grid = knn_grid)
+
+# elastic linear net 
+tune_en <- tune_grid(en_wkflow, 
+   resamples = product_folds, 
+   grid = en_grid)
+
+# decision tree 
+tune_tree <- tune_grid(tree_wkflow, 
+    resamples = product_folds, 
+    grid = param_grid)
+
+# random forest
+tune_rf <- tune_grid(rf_wkflow, 
+      resamples = product_folds, 
+      grid = rf_grid)
+
+# boosted trees
+tune_bt <- tune_grid(bt_wkflow, 
+           resamples = product_folds, 
+           grid = bt_grid)
+```
+
+5)  Saving Tuned Models to RDS File
+
+Now we can save each of the tuned models to a separate RDS file to avoid rerunning the models.
+
+```{r, eval = FALSE}
+# saving tuned models
+save(tune_knn, file = "data/knn.rda") # K Nearest Neighbors
+save(tune_en, file = "data/elastic.rda") # Elastic Net
+save(tune_tree, file = "data/decisiontree.rda") # Decision Tree
+save(tune_rf, file = "data/rf.rda") # Random Forest 
+save(tune_bt, file = "data/bt.rda") # Boosted Trees
+```
+
+6)  Loading Results
+
+Let's load the saved files.
+
+```{r}
+load("data/knn.rda") 
+load("data/elastic.rda")
+load("data/decisiontree.rda")
+load("data/rf.rda")
+load("data/bt.rda")
+```
+
+7)  Collecting Metrics
+
+We can select the best RMSE value for each model to compare, but first we should fit the linear regression to the folds. This is because the linear regression model does not require tuning. We will save each of these RMSE values to compare using a data frame in the next step.
+
+```{r}
+# fit the linear regression to folds 
+lm_fit <- fit_resamples(lm_wkflow, resamples = product_folds) 
+
+# assigning best rmse value for each model
+lm_rmse <- show_best(lm_fit, metric = "rmse")[1,] 
+knn_rmse <- show_best(tune_knn, metric = "rmse")[1,]
+elastic_rmse <- show_best(tune_en, metric = "rmse")[1,]
+dt_rmse <- show_best(tune_tree, metric = "rmse") [1,] 
+rf_rmse <- show_best(tune_rf, metric = "rmse")[1,]
+bt_rmse <- show_best(tune_bt, metric = "rmse")[1,]
+```
+
+# Model Results
+
+Now we can compare the results of our models and visualize the best performing ones. First, let's take a look at the best RMSE of all our models to determine which performed the best on the folded data.
+
+```{r}
+# data frame to view results
+results_rmse <- data.frame(Model = c("Linear Regression", "K Nearest Neighbors", "Elastic Net", "Decision Tree", "Random Forest", "Boosted Trees"), RMSE = c(lm_rmse$mean, knn_rmse$mean, elastic_rmse$mean, dt_rmse$mean, rf_rmse$mean, bt_rmse$mean)) # collecting results in data frame
+
+results_rmse <- results_rmse %>%
+  arrange(RMSE) # arranging in order 
+
+results_rmse
+```
+
+The top 3 models with the lowest RMSE values are: Random Forest, Boosted Trees, Decision Tree. We can visualize these:
+
+```{r, fig.width = 9.15}
+# plotting barplot of results
+ggplot(results_rmse, aes(x = Model, y = RMSE)) + 
+  geom_bar(stat = "identity", aes(fill = Model)) +
+  ggtitle("Barplot of Models and RMSE") +
+  xlab("Model Type") + ylab("RMSE Value") + 
+  scale_fill_manual(values = as.vector(stepped(24))) + theme_minimal()
+```
+
+## Visualizing Model Performances
+
+We will be using the `autoplot` function, and I've decided to display plots of our top 3 models.
+
+### Random Forest
+
+```{r}
+autoplot(tune_rf, metric = "rmse") + theme_bw()
+```
+
+We can see through the plots of our random forest model that the lowest RMSE for all minimal node sizes occurs at 4 randomly selected predictors, with the exception of minimal node size `min_n` of 17. This indicates that we can assume to select `mtry` = 4 for our random forest model to obtain the lowest RMSE. `mtry` refers to the number of predictors that are randomly sampled for each split. Generally, as the number of randomly selected predictors increases past 6, the RMSE value increases as well, and there are high RMSE values when the number of predictors is below 4. Of all values of trees, we can observe that models with 10 trees performed the worst overall as they have higher RMSE values. The rest follow a similar general pattern, despite the minimal node size. The most significant parameter for the Random Forest model appears to be `mtry` in comparison to `min_n` or `trees` as different values of predictors have much higher or lower RMSE. Overall, we can see that this model definitely does well as the lowest RMSE values for each node size are below 0.480.
+
+### Boosted Trees
+
+```{r}
+autoplot(tune_bt, metric = "rmse") + theme_bw()
+```
+
+This boosted trees model uses tuned parameters: `mtry`, `trees`, and `learn_rate`. The auto plot reveals that the best boosted tree model for our dataset is with 140 trees, a learning rate of 0.1, and 2 predictors. I thought this was interesting as the learning rate with the highest consistent RMSE value is also 0.1, when it has 20 trees for all values of randomly selected predictors. Another observation that surprises me is that for the rest of the learning rate values, the models with 20 trees had the lowest RMSE for all numbers of randomly selected predictors. This is quite contrasting to the first learning rate of 0.1.
+
+We can additionally see that as the learning rate increases, the RMSE value also begins to increase, and this occurs when the number of randomly selected predictors increases as well. This observation also is true for all values of trees selected. The model that performed the worst of the boosted trees was with a learning rate of 0.5 and 6 randomly selected predictors with 500 trees. This affirms that just because a boosted tree model has many trees, it doesn't necessarily mean that it will perform the best.
+
+### Decision Tree
+
+```{r}
+autoplot(tune_tree, metric = "rmse") + theme_minimal()
+```
+
+For the decision tree model, the cost-complexity parameter is a positive number that quantifies the tradeoff between the size of a tree and error. As the cost-complexity parameter increases from 0.001 to 0.1, it decreases then slowly increases again right before 0.010. We can observe that the ideal cost-complexity parameter for our decision tree model is below 0.01, specifically at around 0.0077. We can see that there is overfitting that takes place with this model, which is expected as it has a tendency to overfit in comparison to other tree based methods.
+
+# Best Model Results
+
+We determined that the best performing model on our folds with the lowest RMSE was the best fit for predicting Sephora product ratings. We should see which specific parameters were best for this random forest model.
+
+```{r}
+show_best(tune_rf, metric = "rmse")[1,]
+```
+
+And the best model is... Random Forest Model #48! This was the specific random forest model that fit our data best, with an RMSE value of 0.4786, 50 trees, 4 predictors, and a minimum node size of 12.
+
+Now that we determined the optimal Random Forest model in terms of RMSE on our folded data, we can fit it to the training set.
+
+## Fitting to Training Data
+
+Let's fit the best model to the whole training data set.
+
+```{r}
+# select best model
+best_rf <- select_best(tune_rf, metric = "rmse")
+
+# fit to training set
+products_final <- finalize_workflow(rf_wkflow, best_rf) 
+products_final <- fit(products_final, data = products_train)
+```
+
+## Fitting to Testing Data
+
+While the random forest model performed the best, we want to determine how it will be when faced with unfamiliar data. We will fit it to our testing set and see its ability to generalize to brand new data.
+
+```{r}
+# fitting to testing data
+products_final_test <- augment(products_final, products_test)
+rmse(products_final_test, truth = rating, .pred)
+```
+
+We can see that our top model performed with the RMSE value of 0.4810755. Compared to the value of 0.4785896 from the folds, the random forest model did slightly worse but not by a large value! The two RMSE values are fairly close and the difference is around 0.001. Not bad! The estimate is also acceptable when we consider the range of our outcome variable, `rating`, which is from 1 to 5.
+
+### Predicted vs. Actual Values
+
+To visualize our model's performance on the testing data, I created a scatterplot of actual `rating` values and model-predicted values from the testing set. This will give us a good idea of how well our model performed, visually.
+
+```{r}
+# visualizing scatterplot of actual v predicted values
+products_final_test %>% 
+  ggplot(aes(x = .pred, y = rating)) +
+  geom_point(alpha = 0.3, col = "rosybrown3") +
+  geom_abline(lty = 1) +
+  ggtitle("Scatterplot of Actual and Predicted Values") +
+  theme_minimal()
+```
+
+Based on this plot, many of the points do fall on the line, though most are clustered around it. Overall, we can see that though the model was not able to perfectly predict `rating`, it still did a relatively good job as the points follow a similar pattern as the values increase.
+
+## Variable Importance
+
+Using our best Random Forest model, we can create a variable importance plot to see which predictors were significant in determining `rating`.
+
+```{r}
+# plotting VIP plot
+products_final %>%
+  extract_fit_parsnip() %>%
+  vip(aesthetics = list(fill = "rosybrown3", color = "rosybrown3")) + 
+  ggtitle("Variable Importance Plot") +
+  theme_minimal()
+```
+
+Like we expected, `reviews` plays a large role in predicting `rating`! This makes sense as generally products with more reviews might have more balanced ratings, making it useful in predicting rating. There may be a consistent relationship between reviews and ratings in the training dataset for the Random Forest model. The second highest variable, `loves_count`, is also a significant predictor. Similarly to `reviews`, the higher number of "loves" for a particular product may be a good indicator to our model of what a rating may be. Price, the third highest variable of importance, also is reasonable as it can influence consumer expectations when shopping. Consumers may rate products more highly when an expensive item meets their expectations whereas if a product is overpriced, its rating may be lower.
+
+# Conclusion
+
+We have determined that the best performing model to predict a product's `rating` from the Sephora dataset is the random forest model. Although this model was not perfect in predicting `rating`, it is reasonable that it performed well since it averages the results of multiple decision trees. In random forests, each split of each tree is performed with a random subset, which can allow for a comprehensive exploration of feature space. This allows it to avoid overfitting and to be more flexible in generalizing to new data.
+
+The worst performing model was the K Nearest Neighbors model (KNN), as it yielded the highest RMSE. This is also reasonable as it tends to perform worse when there is high dimensionality and the distance between points makes it difficult to find the distinct nearest neighbors. KNN models are also sensitive to outliers, and may not be able to capture the complex relationships in our data as there were many predictors considered.
+
+One way to improve model performance may be to incorporate and consider other variables. These can include the number of sales a particular product has received in the past year, how long the product has been sold at Sephora, and whether or not the item is considered a 'bestseller.' Another predictor variable that would be interesting to explore could be the ingredients of products. Ingredient conscious consumers may be more inclined to give certain products a higher rating than others. Utilizing predictors like these could provide further insight on consumer shopping decisions with a more specific perspective on product performance.
+
+In addition, another method to move forward with analysis of `rating` could be to explore the actual text of `reviews` that are written on the site. Sentiment or text analysis can determine the emotional tone of the review and which products may have these common tones. This may be helpful for businesses such as Sephora to determine common issues with certain products sold depending on the review itself. It would be interesting to see how the tone of the `reviews` could also play a role in predicting `rating`.
+
+Ultimately, process of exploring the dataset and evaluating model performance has allowed me to further my understanding of predictive methods and interpretation of results. This project has not only enhanced my knowledge on machine learning techniques--it also broadened my perspective on how such insights can have significant implications in business contexts! I've also found myself more interested in understanding the reasoning behind why a certain model may perform better than others and how the features specific to my dataset can contribute to this. Although the random forest model did not perfectly predict the `rating` of a Sephora product, this project has been a valuable opportunity to apply machine learning methods to real world data!
+
+![Image [Source](https://giphy.com/gifs/90s-clueless-cher-horowitz-MEgGD8bV72hfq)](images/shopping1-02.gif)
