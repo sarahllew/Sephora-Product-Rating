@@ -1,2 +1,3 @@
 Predicting the `rating` of a product on the Sephora online store using machine learning models in R.
-Using machine learning models: KNN, linear regression, elastic net, decision tree, random forest, 
+Trained machine learning models: KNN, linear regression, elastic net, decision tree, random forest, boosted trees
+Tested best performing machine learning model on Kaggle dataset to predict product `rating`
