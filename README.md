@@ -15,14 +15,14 @@ The dataset that I am using for the project was found on Kaggle, “Sephora Prod
 ### Data Cleaning & Exploratory Data Analysis (EDA) 📊
 Let's start by tidying and exploring the raw data. Our dataset has quite a bit of missing values! There is missing data for 14 of the 27 predictors. 
 
-I will examine if there is a pattern of missingness between variables. What’s notable in the missing data plot is rating and reviews. There is 3.27% of data for the response variable, rating, that is missing, and we can see that this same percent is missing for reviews.
+I will examine if there is a pattern of missingness between variables. What’s notable in the missing data plot is `rating` and `reviews`. There is 3.27% of data for the response variable, `rating`, that is missing, and we can see that this same percent is missing for `reviews`.
 
 While 19.3% of the data is missing, 80.7% is present and we can still use that for our EDA process.
 
 To understand the data further, I conducted visual EDA. This included
 - distribution of response variable `rating`
 - variable correlation plot (correlation  matrix of numeric variables to determine relationship)
-- product prices:  I expect that products with lower prices may have a higher rating as they are more affordable. This is because cheaper products can be perceived to offer good value for the price paid, especially when it performs better than expected for that price point.
+- `product prices`:  I expect that products with lower prices may have a higher rating as they are more affordable. This is because cheaper products can be perceived to offer good value for the price paid, especially when it performs better than expected for that price point.
 -  box plot: measuring correlation with Sephora Exclusive products and `rating`.
 To view more visualations I conducted, you can take a look at my full report under "Visual Exploratory Data Analysis" 
  
@@ -31,7 +31,9 @@ Now that we have a better understanding of our dataset, we can start setting up 
 
 I decided to use 0.7 as the proportion for the split so that there is a significant amount of training data to help the model predict accurate results. This will help with reducing overfitting and improve the model’s performance on the testing data. It is also important to set a seed so that we can reproduce our results.
 
-Now we can finally start building our models. The model building process consists of these steps. For this project, I have decided to fit 6 models: Linear Regression, K Nearest Neighbors, Elastic Net Linear Regression, Decision Tree, Random Forest, and Boosted Trees.
+Now we can finally start building our models. The model building process consists of these steps. For this project, I have decided to fit 6 models: 
+
+### Linear Regression, K Nearest Neighbors, Elastic Net Linear Regression, Decision Tree, Random Forest, and Boosted Trees.
 
 To access the performance of all our models, I decided to choose Root Mean Squared Error (RMSE) as the metric. Lower values of RMSE indicate a better predictive accuracy.
 
@@ -50,7 +52,7 @@ Using a random forest model, I created a variable importance plot to identify to
 
 ## Results & Next Steps 🎯
 
-We have determined that the best performing model to predict a product’s rating from the Sephora dataset is the random forest model.
+I determined that the best performing model to predict a product’s rating from the Sephora dataset is the random forest model.
 One way to improve model performance may be to incorporate and consider other variables. 
 - number of sales a particular product has received in the past year
 - how long the product has been sold at Sephora
