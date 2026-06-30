@@ -50,13 +50,17 @@ Using a random forest model, I created a variable importance plot to identify to
 - loves_count (count of how many 'likes' a product receives)
 - price_usd
 
+Like expected, reviews plays a large role in predicting rating! This makes sense as generally products with more reviews might have more balanced ratings, making it useful in predicting rating. There may be a consistent relationship between reviews and ratings in the training dataset for the Random Forest model. The second highest variable, loves_count, is also a significant predictor. Similarly to reviews, the higher number of “loves” for a particular product may be a good indicator to our model of what a rating may be. Price, the third highest variable of importance, also is reasonable as it can influence consumer expectations when shopping. Consumers may rate products more highly when an expensive item meets their expectations whereas if a product is overpriced, its rating may be lower.
+
 ## Results & Next Steps 🎯
 
 I determined that the best performing model to predict a product’s rating from the Sephora dataset is the random forest model.
-One way to improve model performance may be to incorporate and consider other variables. 
+One way to improve model performance may be to incorporate and consider other variables such as: 
 - number of sales a particular product has received in the past year
 - how long the product has been sold at Sephora
--  whether or not the item is considered a ‘bestseller.’ 
+- whether or not the item is considered a ‘bestseller.’
+
+This project has not only enhanced my knowledge on machine learning techniques–it also broadened my perspective on how such insights can have significant implications in business contexts! I’ve also found myself more interested in understanding the reasoning behind why a certain model may perform better than others and how the features specific to my dataset can contribute to this. Although the random forest model did not perfectly predict the rating of a Sephora product, this project has been a valuable opportunity to apply machine learning methods to real world data.
 
 ## Full Project Report: 
 https://sarahllew.github.io/Predicting_Sephora_ML.html
